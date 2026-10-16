@@ -1,151 +1,346 @@
-<!DOCTYPE html>
-<html lang="vi">
+<!doctype html>
+<html lang="vi" translate="no">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Giám sát Vườn Cà phê – Hồ tiêu</title>
-<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Runner Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
-  :root { --bg:#f3f6f1; --card:#fff; --text:#1f2a1f; --muted:#6b7a6b;
-          --green:#2e7d32; --red:#c62828; --blue:#1565c0; --amber:#ef8f00; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
-  header { background:#2f4a2a; color:#fff; padding:18px 16px; text-align:center; }
-  header h1 { margin:0; font-size:1.35rem; }
-  header p { margin:6px 0 0; opacity:.8; font-size:.9rem; }
-  .status { display:inline-block; margin-top:8px; padding:3px 10px; border-radius:20px; font-size:.8rem; background:#555; }
-  .status.on { background:var(--green); }
-  main { max-width:1000px; margin:auto; padding:16px; }
-  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
-  .card { background:var(--card); border-radius:14px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.06); }
-  .card .label { color:var(--muted); font-size:.9rem; }
-  .card .value { font-size:2.4rem; font-weight:700; margin-top:6px; }
-  .temp .value { color:var(--amber); }
-  .humi .value { color:var(--blue); }
-  .note { font-size:.85rem; margin-top:6px; font-weight:600; }
-  .controls { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); margin-top:16px; }
-  button { width:100%; padding:14px; font-size:1rem; font-weight:600; border:none; border-radius:10px;
-           cursor:pointer; color:#fff; background:#888; transition:.2s; }
-  button.on { background:var(--green); }
-  button.fan.on { background:var(--red); }
-  button.mode { background:var(--blue); }
-  button.mode.manual { background:#6a1b9a; }
-  .charts { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); margin-top:16px; }
-  canvas { width:100% !important; height:220px !important; }
+  :root {
+    --bg: #f3f5f2;
+    --panel: #ffffff;
+    --ink: #17201b;
+    --muted: #5d6a62;
+    --line: #dde3dd;
+    --track: #1f6f4a;
+    --temp: #d9480f;
+    --alt: #1864ab;
+    --ok: #2b8a3e;
+    --warn: #e67700;
+    --bad: #c92a2a;
+    --font-body: "Be Vietnam Pro", "Segoe UI", Roboto, Arial, sans-serif;
+    --font-num: "JetBrains Mono", "Consolas", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 var(--font-body);
+    padding: 20px max(16px, env(safe-area-inset-right, 0px)) 28px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--track); color: #fff; border-radius: 14px; padding: 16px 20px;
+  }
+  .brand h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+  .brand p { margin: 2px 0 0; font-size: 13px; opacity: .85; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+    background: rgba(255,255,255,.14); font-size: 13px; font-weight: 500; white-space: nowrap;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #adb5bd; }
+  .dot.on { background: #69db7c; box-shadow: 0 0 0 3px rgba(105,219,124,.25); }
+  .dot.off { background: #ff8787; }
+
+  .readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .reading .value-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+  .reading .num { font: 700 40px/1.1 var(--font-num); font-variant-numeric: tabular-nums; }
+  .reading .unit { font-size: 16px; color: var(--muted); font-weight: 500; }
+  .reading .sub { margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .reading.t .num { color: var(--temp); }
+  .reading.h .num { color: var(--alt); }
+
+  .alert-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-radius: 14px; padding: 14px 18px;
+    border: 1px solid var(--line); background: var(--panel); border-left: 8px solid var(--ok);
+  }
+  .alert-bar .alert-text { font-size: 18px; font-weight: 700; }
+  .alert-bar .alert-hint { color: var(--muted); font-size: 13px; flex: 1 1 260px; }
+  .alert-bar.normal { border-left-color: var(--ok); }
+  .alert-bar.normal .alert-text { color: var(--ok); }
+  .alert-bar.temp_high, .alert-bar.temp_low { border-left-color: var(--warn); background: #fff4e6; }
+  .alert-bar.temp_high .alert-text, .alert-bar.temp_low .alert-text { color: #b35c00; }
+  .alert-bar.altitude { border-left-color: var(--bad); background: #fff5f5; }
+  .alert-bar.altitude .alert-text { color: var(--bad); }
+
+  .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .ctrl { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .ctrl .state { font: 700 22px/1.2 var(--font-num); margin-top: 4px; }
+  .state.on { color: var(--bad); }
+  .state.off { color: var(--muted); }
+  .state.auto { color: var(--track); }
+  .state.manual { color: var(--warn); }
+  button {
+    font: 600 14px/1 var(--font-body); padding: 12px 18px; border-radius: 10px; cursor: pointer;
+    border: 2px solid var(--track); background: var(--track); color: #fff; min-width: 120px;
+  }
+  button.ghost { background: transparent; color: var(--track); }
+  button:hover { filter: brightness(1.08); }
+  button:focus-visible { outline: 3px solid #74c0fc; outline-offset: 2px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .chart-box { position: relative; height: 260px; margin-top: 8px; }
+
+  .meta { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+  .topics { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .topics td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .topics td:first-child { font-family: var(--font-num); font-size: 12px; color: var(--track); word-break: break-all; }
+  .log { margin: 8px 0 0; padding: 0; list-style: none; font: 12px/1.6 var(--font-num); color: var(--muted); max-height: 190px; overflow: auto; }
+  .log li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log b { color: var(--ink); font-weight: 500; }
+
+  @media (max-width: 860px) {
+    .readings, .controls, .charts, .meta { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>🌱 Giám sát Vườn Cà phê – Hồ tiêu</h1>
-  <p>ESP32 · DHT22 · MQTT · Ngưỡng độ ẩm 40% – 60%</p>
-  <span id="conn" class="status">Đang kết nối broker...</span>
-</header>
-
-<main>
-  <div class="grid">
-    <div class="card temp">
-      <div class="label">🌡️ Nhiệt độ</div>
-      <div class="value"><span id="temp">--</span> °C</div>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>Runner Monitor</h1>
+      <p>Giám sát và cảnh báo người chạy – ESP32 + BMP180 + MQTT</p>
     </div>
-    <div class="card humi">
-      <div class="label">💧 Độ ẩm</div>
-      <div class="value"><span id="humi">--</span> %</div>
-      <div class="note" id="humiNote">--</div>
+    <div class="chips">
+      <span class="chip"><span class="dot" id="dotBroker"></span><span id="txtBroker">Broker: đang kết nối…</span></span>
+      <span class="chip"><span class="dot" id="dotDevice"></span><span id="txtDevice">ESP32: chưa rõ</span></span>
+      <span class="chip">Cập nhật: <span id="txtUpdated">--:--:--</span></span>
     </div>
-  </div>
+  </header>
 
-  <div class="controls">
-    <button id="btnMode" class="mode">Chế độ: AUTO</button>
-    <button id="btnPump" class="pump">Máy bơm: OFF</button>
-    <button id="btnFan"  class="fan">Quạt hút ẩm: OFF</button>
-  </div>
+  <section class="readings">
+    <div class="card reading t">
+      <div class="label">Nhiệt độ</div>
+      <div class="value-row"><span class="num temp-value">--.-</span><span class="unit">°C</span></div>
+      <div class="sub">Ngưỡng cảnh báo: dưới 10 °C hoặc trên 35 °C</div>
+    </div>
+    <div class="card reading p">
+      <div class="label">Áp suất khí quyển</div>
+      <div class="value-row"><span class="num pressure-value">----.--</span><span class="unit">hPa</span></div>
+      <div class="sub">Áp suất chuẩn mực nước biển: 1013.25 hPa</div>
+    </div>
+    <div class="card reading h">
+      <div class="label">Độ cao so với mực nước biển</div>
+      <div class="value-row"><span class="num altitude-value">---.-</span><span class="unit">m</span></div>
+      <div class="sub">Tốc độ đổi độ cao: <span class="rate-value">--</span> m/s</div>
+    </div>
+  </section>
 
-  <div class="charts">
-    <div class="card"><div class="label">Biểu đồ nhiệt độ (°C)</div><canvas id="chartT"></canvas></div>
-    <div class="card"><div class="label">Biểu đồ độ ẩm (%)</div><canvas id="chartH"></canvas></div>
-  </div>
-</main>
+  <section class="alert-bar normal" id="alertBar">
+    <span class="label">Cảnh báo</span>
+    <span class="alert-text" id="alertText">Chưa có dữ liệu</span>
+    <span class="alert-hint" id="alertHint">Đang chờ ESP32 gửi dữ liệu lên broker.</span>
+  </section>
 
+  <section class="controls">
+    <div class="card ctrl">
+      <div>
+        <div class="label">Chế độ điều khiển</div>
+        <div class="state mode-value auto" id="modeState">--</div>
+      </div>
+      <button id="btnMode" class="ghost" disabled>Chuyển sang MANUAL</button>
+    </div>
+    <div class="card ctrl">
+      <div>
+        <div class="label">LED cảnh báo</div>
+        <div class="state led-value off" id="ledState">--</div>
+      </div>
+      <button id="btnLed" disabled>Bật LED</button>
+    </div>
+    <div class="card ctrl">
+      <div>
+        <div class="label">Loa cảnh báo</div>
+        <div class="state buzzer-value off" id="buzState">--</div>
+      </div>
+      <button id="btnBuz" disabled>Bật loa</button>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="card">
+      <div class="label">Biểu đồ nhiệt độ (°C) theo thời gian thực</div>
+      <div class="chart-box"><canvas id="chartTemp"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="label">Biểu đồ độ cao (m) theo thời gian thực</div>
+      <div class="chart-box"><canvas id="chartAlt"></canvas></div>
+    </div>
+  </section>
+
+  <section class="meta">
+    <div class="card">
+      <div class="label">Topic MQTT</div>
+      <table class="topics">
+        <tbody id="topicTable"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="label">Tin nhắn MQTT gần nhất</div>
+      <ul class="log" id="log"></ul>
+    </div>
+  </section>
+</div>
+
+<script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-  // Phải trùng với TOPIC_BASE trong sketch.ino
-  const BASE = "vietanh/vuoncaphe";
-  const BROKER = "wss://broker.hivemq.com:8884/mqtt";
-  const MAX_POINTS = 30;
+  const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
+  const PREFIX = "nbva_thcn1/runner";
+  const MAX_POINTS = 40;
 
-  let state = { pump:0, fan:0, mode:"AUTO" };
+  const TOPICS = [
+    ["/temperature", "ESP32 → Web", "Nhiệt độ (°C)"],
+    ["/pressure", "ESP32 → Web", "Áp suất (hPa)"],
+    ["/altitude", "ESP32 → Web", "Độ cao (m)"],
+    ["/vspeed", "ESP32 → Web", "Tốc độ đổi độ cao (m/s)"],
+    ["/alert", "ESP32 → Web", "Trạng thái cảnh báo"],
+    ["/status", "ESP32 → Web", "online / offline (LWT)"],
+    ["/led/state", "ESP32 → Web", "Trạng thái LED"],
+    ["/buzzer/state", "ESP32 → Web", "Trạng thái loa"],
+    ["/mode/state", "ESP32 → Web", "AUTO / MANUAL"],
+    ["/led/set", "Web → ESP32", "Lệnh LED: ON / OFF"],
+    ["/buzzer/set", "Web → ESP32", "Lệnh loa: ON / OFF"],
+    ["/mode/set", "Web → ESP32", "Lệnh chế độ: AUTO / MANUAL"]
+  ];
 
-  function makeChart(id, color, label) {
+  const ALERTS = {
+    NORMAL:    { text: "Bình thường", hint: "Nhiệt độ trong ngưỡng 10 – 35 °C, độ cao thay đổi bình thường.", cls: "normal" },
+    TEMP_HIGH: { text: "Nhiệt độ quá cao", hint: "Trên 35 °C: nguy cơ sốc nhiệt, người chạy nên giảm tốc, bổ sung nước.", cls: "temp_high" },
+    TEMP_LOW:  { text: "Nhiệt độ quá thấp", hint: "Dưới 10 °C: nguy cơ hạ thân nhiệt, cần giữ ấm.", cls: "temp_low" },
+    ALTITUDE:  { text: "Độ cao thay đổi đột ngột", hint: "Tốc độ đổi độ cao vượt 2 m/s: có thể ngã, trượt dốc hoặc sự cố.", cls: "altitude" }
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const state = { led: null, buzzer: null, mode: null };
+
+  const tbody = $("#topicTable");
+  TOPICS.forEach(([t, dir, desc]) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${PREFIX}${t}</td><td>${dir}</td><td>${desc}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  function makeChart(id, label, color) {
     return new Chart(document.getElementById(id), {
       type: "line",
-      data: { labels: [], datasets: [{ label, data: [], borderColor: color,
-              backgroundColor: color + "22", fill: true, tension: .3, pointRadius: 2 }] },
-      options: { animation: false, responsive: true, plugins: { legend: { display: false } } }
+      data: { labels: [], datasets: [{ label, data: [], borderColor: color, backgroundColor: color + "22", fill: "start", tension: 0, pointRadius: 2, borderWidth: 2 }] },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6, color: "#5d6a62" }, grid: { color: "#eef1ee" } },
+          y: { ticks: { color: "#5d6a62" }, grid: { color: "#eef1ee" } }
+        }
+      }
     });
   }
-  const chartT = makeChart("chartT", "#ef8f00", "Nhiệt độ");
-  const chartH = makeChart("chartH", "#1565c0", "Độ ẩm");
+  const chartTemp = makeChart("chartTemp", "Nhiệt độ (°C)", "#d9480f");
+  const chartAlt = makeChart("chartAlt", "Độ cao (m)", "#1864ab");
 
-  function push(chart, label, v) {
-    chart.data.labels.push(label);
-    chart.data.datasets[0].data.push(v);
-    if (chart.data.labels.length > MAX_POINTS) {
-      chart.data.labels.shift(); chart.data.datasets[0].data.shift();
-    }
+  function pushPoint(chart, value) {
+    const t = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+    chart.data.labels.push(t);
+    chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > MAX_POINTS) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
     chart.update();
   }
 
-  function render() {
-    const bp = document.getElementById("btnPump");
-    const bf = document.getElementById("btnFan");
-    const bm = document.getElementById("btnMode");
-    bp.textContent = "Máy bơm: " + (state.pump ? "ON" : "OFF");
-    bf.textContent = "Quạt hút ẩm: " + (state.fan ? "ON" : "OFF");
-    bp.classList.toggle("on", !!state.pump);
-    bf.classList.toggle("on", !!state.fan);
-    bm.textContent = "Chế độ: " + state.mode;
-    bm.classList.toggle("manual", state.mode === "MANUAL");
+  function stamp() { $("#txtUpdated").textContent = new Date().toLocaleTimeString("vi-VN", { hour12: false }); }
+
+  function log(topic, msg) {
+    const li = document.createElement("li");
+    const t = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+    li.innerHTML = `${t} <b>${topic.replace(PREFIX, "…")}</b> = ${msg}`;
+    const ul = $("#log");
+    ul.prepend(li);
+    while (ul.children.length > 30) ul.lastChild.remove();
   }
 
-  const client = mqtt.connect(BROKER, {
-    clientId: "web-vuoncaphe-" + Math.random().toString(16).slice(2, 8),
-    reconnectPeriod: 3000
+  function setBroker(ok, text) {
+    $("#dotBroker").className = "dot " + (ok ? "on" : "off");
+    $("#txtBroker").textContent = text;
+    ["#btnMode", "#btnLed", "#btnBuz"].forEach((b) => ($(b).disabled = !ok));
+  }
+
+  function renderOutputs() {
+    const led = $("#ledState"), buz = $("#buzState"), mode = $("#modeState");
+    if (state.led !== null) { led.textContent = state.led ? "ĐANG BẬT" : "ĐANG TẮT"; led.className = "state led-value " + (state.led ? "on" : "off"); $("#btnLed").textContent = state.led ? "Tắt LED" : "Bật LED"; }
+    if (state.buzzer !== null) { buz.textContent = state.buzzer ? "ĐANG BẬT" : "ĐANG TẮT"; buz.className = "state buzzer-value " + (state.buzzer ? "on" : "off"); $("#btnBuz").textContent = state.buzzer ? "Tắt loa" : "Bật loa"; }
+    if (state.mode !== null) { mode.textContent = state.mode; mode.className = "state mode-value " + state.mode.toLowerCase(); $("#btnMode").textContent = state.mode === "AUTO" ? "Chuyển sang MANUAL" : "Chuyển sang AUTO"; }
+  }
+
+  function setDevice(on) {
+    $("#dotDevice").className = "dot " + (on ? "on" : "off");
+    $("#txtDevice").textContent = "ESP32: " + (on ? "online" : "offline");
+  }
+
+  const client = mqtt.connect(BROKER_URL, {
+    clientId: "web-runner-" + Math.random().toString(16).slice(2, 10),
+    clean: true, reconnectPeriod: 3000, connectTimeout: 10000
   });
-  const conn = document.getElementById("conn");
 
   client.on("connect", () => {
-    conn.textContent = "Đã kết nối broker"; conn.classList.add("on");
-    client.subscribe(BASE + "/data");
+    setBroker(true, "Broker: đã kết nối");
+    client.subscribe(PREFIX + "/#");
   });
-  client.on("close", () => { conn.textContent = "Mất kết nối – đang thử lại..."; conn.classList.remove("on"); });
+  client.on("reconnect", () => setBroker(false, "Broker: đang kết nối lại…"));
+  client.on("close", () => setBroker(false, "Broker: mất kết nối"));
+  client.on("error", (e) => setBroker(false, "Broker: lỗi " + e.message));
 
-  client.on("message", (topic, payload) => {
-    let d;
-    try { d = JSON.parse(payload.toString()); } catch { return; }
-    const time = new Date().toLocaleTimeString("vi-VN");
-
-    if (d.t > -900) {
-      document.getElementById("temp").textContent = d.t.toFixed(1);
-      push(chartT, time, d.t);
+  client.on("message", (topic, payload, packet) => {
+    const msg = payload.toString().trim();
+    const key = topic.slice(PREFIX.length);
+    log(topic, msg);
+    stamp();
+    if (!packet.retain && key !== "/status" && !key.endsWith("/set")) setDevice(true);
+    switch (key) {
+      case "/temperature": {
+        const v = parseFloat(msg);
+        $(".temp-value").textContent = v.toFixed(1);
+        pushPoint(chartTemp, v);
+        break;
+      }
+      case "/pressure":
+        $(".pressure-value").textContent = parseFloat(msg).toFixed(2);
+        break;
+      case "/altitude": {
+        const v = parseFloat(msg);
+        $(".altitude-value").textContent = v.toFixed(1);
+        pushPoint(chartAlt, v);
+        break;
+      }
+      case "/vspeed":
+        $(".rate-value").textContent = parseFloat(msg).toFixed(2);
+        break;
+      case "/alert": {
+        const a = ALERTS[msg] || ALERTS.NORMAL;
+        $("#alertBar").className = "alert-bar " + a.cls;
+        $("#alertText").textContent = a.text;
+        $("#alertHint").textContent = a.hint;
+        break;
+      }
+      case "/status":
+        setDevice(msg === "online");
+        break;
+      case "/led/state": state.led = msg === "ON"; renderOutputs(); break;
+      case "/buzzer/state": state.buzzer = msg === "ON"; renderOutputs(); break;
+      case "/mode/state": state.mode = msg; renderOutputs(); break;
     }
-    if (d.h > -900) {
-      document.getElementById("humi").textContent = d.h.toFixed(1);
-      push(chartH, time, d.h);
-      const n = document.getElementById("humiNote");
-      if (d.h < 40)      { n.textContent = "Khô – cần tưới";   n.style.color = "#c62828"; }
-      else if (d.h > 60) { n.textContent = "Ẩm – cần hút ẩm"; n.style.color = "#ef8f00"; }
-      else               { n.textContent = "Ổn định";          n.style.color = "#2e7d32"; }
-    }
-    state = { pump: d.pump, fan: d.fan, mode: d.mode };
-    render();
   });
 
-  document.getElementById("btnPump").onclick = () =>
-    client.publish(BASE + "/cmd/pump", state.pump ? "OFF" : "ON");
-  document.getElementById("btnFan").onclick = () =>
-    client.publish(BASE + "/cmd/fan", state.fan ? "OFF" : "ON");
-  document.getElementById("btnMode").onclick = () =>
-    client.publish(BASE + "/cmd/mode", state.mode === "AUTO" ? "MANUAL" : "AUTO");
+  $("#btnLed").addEventListener("click", () => client.publish(PREFIX + "/led/set", state.led ? "OFF" : "ON"));
+  $("#btnBuz").addEventListener("click", () => client.publish(PREFIX + "/buzzer/set", state.buzzer ? "OFF" : "ON"));
+  $("#btnMode").addEventListener("click", () => client.publish(PREFIX + "/mode/set", state.mode === "AUTO" ? "MANUAL" : "AUTO"));
 </script>
 </body>
 </html>
