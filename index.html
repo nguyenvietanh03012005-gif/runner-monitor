@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Giám sát Vườn Cà phê – Hồ tiêu</title>
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#f3f6f1; --card:#fff; --text:#1f2a1f; --muted:#6b7a6b;
+          --green:#2e7d32; --red:#c62828; --blue:#1565c0; --amber:#ef8f00; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { background:#2f4a2a; color:#fff; padding:18px 16px; text-align:center; }
+  header h1 { margin:0; font-size:1.35rem; }
+  header p { margin:6px 0 0; opacity:.8; font-size:.9rem; }
+  .status { display:inline-block; margin-top:8px; padding:3px 10px; border-radius:20px; font-size:.8rem; background:#555; }
+  .status.on { background:var(--green); }
+  main { max-width:1000px; margin:auto; padding:16px; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+  .card { background:var(--card); border-radius:14px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+  .card .label { color:var(--muted); font-size:.9rem; }
+  .card .value { font-size:2.4rem; font-weight:700; margin-top:6px; }
+  .temp .value { color:var(--amber); }
+  .humi .value { color:var(--blue); }
+  .note { font-size:.85rem; margin-top:6px; font-weight:600; }
+  .controls { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); margin-top:16px; }
+  button { width:100%; padding:14px; font-size:1rem; font-weight:600; border:none; border-radius:10px;
+           cursor:pointer; color:#fff; background:#888; transition:.2s; }
+  button.on { background:var(--green); }
+  button.fan.on { background:var(--red); }
+  button.mode { background:var(--blue); }
+  button.mode.manual { background:#6a1b9a; }
+  .charts { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); margin-top:16px; }
+  canvas { width:100% !important; height:220px !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌱 Giám sát Vườn Cà phê – Hồ tiêu</h1>
+  <p>ESP32 · DHT22 · MQTT · Ngưỡng độ ẩm 40% – 60%</p>
+  <span id="conn" class="status">Đang kết nối broker...</span>
+</header>
+
+<main>
+  <div class="grid">
+    <div class="card temp">
+      <div class="label">🌡️ Nhiệt độ</div>
+      <div class="value"><span id="temp">--</span> °C</div>
+    </div>
+    <div class="card humi">
+      <div class="label">💧 Độ ẩm</div>
+      <div class="value"><span id="humi">--</span> %</div>
+      <div class="note" id="humiNote">--</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="btnMode" class="mode">Chế độ: AUTO</button>
+    <button id="btnPump" class="pump">Máy bơm: OFF</button>
+    <button id="btnFan"  class="fan">Quạt hút ẩm: OFF</button>
+  </div>
+
+  <div class="charts">
+    <div class="card"><div class="label">Biểu đồ nhiệt độ (°C)</div><canvas id="chartT"></canvas></div>
+    <div class="card"><div class="label">Biểu đồ độ ẩm (%)</div><canvas id="chartH"></canvas></div>
+  </div>
+</main>
+
+<script>
+  // Phải trùng với TOPIC_BASE trong sketch.ino
+  const BASE = "vietanh/vuoncaphe";
+  const BROKER = "wss://broker.hivemq.com:8884/mqtt";
+  const MAX_POINTS = 30;
+
+  let state = { pump:0, fan:0, mode:"AUTO" };
+
+  function makeChart(id, color, label) {
+    return new Chart(document.getElementById(id), {
+      type: "line",
+      data: { labels: [], datasets: [{ label, data: [], borderColor: color,
+              backgroundColor: color + "22", fill: true, tension: .3, pointRadius: 2 }] },
+      options: { animation: false, responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+  const chartT = makeChart("chartT", "#ef8f00", "Nhiệt độ");
+  const chartH = makeChart("chartH", "#1565c0", "Độ ẩm");
+
+  function push(chart, label, v) {
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(v);
+    if (chart.data.labels.length > MAX_POINTS) {
+      chart.data.labels.shift(); chart.data.datasets[0].data.shift();
+    }
+    chart.update();
+  }
+
+  function render() {
+    const bp = document.getElementById("btnPump");
+    const bf = document.getElementById("btnFan");
+    const bm = document.getElementById("btnMode");
+    bp.textContent = "Máy bơm: " + (state.pump ? "ON" : "OFF");
+    bf.textContent = "Quạt hút ẩm: " + (state.fan ? "ON" : "OFF");
+    bp.classList.toggle("on", !!state.pump);
+    bf.classList.toggle("on", !!state.fan);
+    bm.textContent = "Chế độ: " + state.mode;
+    bm.classList.toggle("manual", state.mode === "MANUAL");
+  }
+
+  const client = mqtt.connect(BROKER, {
+    clientId: "web-vuoncaphe-" + Math.random().toString(16).slice(2, 8),
+    reconnectPeriod: 3000
+  });
+  const conn = document.getElementById("conn");
+
+  client.on("connect", () => {
+    conn.textContent = "Đã kết nối broker"; conn.classList.add("on");
+    client.subscribe(BASE + "/data");
+  });
+  client.on("close", () => { conn.textContent = "Mất kết nối – đang thử lại..."; conn.classList.remove("on"); });
+
+  client.on("message", (topic, payload) => {
+    let d;
+    try { d = JSON.parse(payload.toString()); } catch { return; }
+    const time = new Date().toLocaleTimeString("vi-VN");
+
+    if (d.t > -900) {
+      document.getElementById("temp").textContent = d.t.toFixed(1);
+      push(chartT, time, d.t);
+    }
+    if (d.h > -900) {
+      document.getElementById("humi").textContent = d.h.toFixed(1);
+      push(chartH, time, d.h);
+      const n = document.getElementById("humiNote");
+      if (d.h < 40)      { n.textContent = "Khô – cần tưới";   n.style.color = "#c62828"; }
+      else if (d.h > 60) { n.textContent = "Ẩm – cần hút ẩm"; n.style.color = "#ef8f00"; }
+      else               { n.textContent = "Ổn định";          n.style.color = "#2e7d32"; }
+    }
+    state = { pump: d.pump, fan: d.fan, mode: d.mode };
+    render();
+  });
+
+  document.getElementById("btnPump").onclick = () =>
+    client.publish(BASE + "/cmd/pump", state.pump ? "OFF" : "ON");
+  document.getElementById("btnFan").onclick = () =>
+    client.publish(BASE + "/cmd/fan", state.fan ? "OFF" : "ON");
+  document.getElementById("btnMode").onclick = () =>
+    client.publish(BASE + "/cmd/mode", state.mode === "AUTO" ? "MANUAL" : "AUTO");
+</script>
+</body>
+</html>
